@@ -7,7 +7,8 @@ var pump = require('pump')
 var argv = minimist(process.argv.slice(2), {
   alias: {
     v: 'version', h: 'help',
-    d: 'datadir', f: 'format', p: 'port', q: 'quiet'
+    d: 'datadir', f: 'format', p: 'port', q: 'quiet',
+    c: 'cert', k: 'key',
   },
   boolean: ['quiet','help','version'],
 })
@@ -56,8 +57,20 @@ if (argv.help || argv._[0] === 'help') {
     if (lp) lp.end()
     if (typeof storage.close === 'function') storage.close()
   })
-} else if (argv._[0] === 'http') {
-  var http = require('http')
+} else if (argv._[0] === 'http' || argv._[0] === 'https') {
+  var protocol
+  var serverOptions = {}
+  if (argv._[0] === 'http') {
+    protocol = require('http')
+  }
+  else if (argv._[0] === 'https') {
+    protocol = require('https')
+    serverOptions = {
+      key: fs.readFileSync(argv.k || path.join(__dirname, 'localhost-key.pem')),
+      cert: fs.readFileSync(argv.c|| path.join(__dirname, 'localhost-cert.pem')),
+    }
+    console.log({serverOptions})
+  }
   var Hyperdrive = require('hyperdrive')
   var hyperswarm = require('hyperswarm')
   var mime = require('mime')
@@ -65,9 +78,11 @@ if (argv.help || argv._[0] === 'help') {
   var datadir = getDataDir()
   var m = /^hyper:[\/]*([^\/]+)/.exec(u)
   if (!m) return console.error('URI not yet supported')
-  var file = path.join(datadir, m[1].replace(/[^A-Za-z0-9]+/g,'-'))
+  // var file = path.join(datadir, m[1].replace(/[^A-Za-z0-9]+/g,'-'))
+  var file = datadir
   var key = u.replace(/^hyper:[\/]*/,'')
   var swarm = hyperswarm()
+  console.log({ file, key })
   var drive = new Hyperdrive(file, key)
   var isOpen = false
   var openQueue = []
@@ -79,16 +94,18 @@ if (argv.help || argv._[0] === 'help') {
     openQueue = null
   }
   drive.once('ready', function () {
+    console.log('drive.discoveryKey:', drive.discoveryKey)
     swarm.join(drive.discoveryKey)
+    if (!isOpen) open()
   })
   swarm.on('connection', function (socket, info) {
+    console.log('connection')
     var peer = `${info.peer.host}:${info.peer.port}`
     if (!argv.quiet) console.log(`connected to ${peer}`)
     pump(socket, drive.replicate(info.client), socket, function (err) {
       if (err) console.error(`pump error on ${peer}`, err)
       else if (!argv.quiet) console.log(`pump finished on ${peer}`)
     })
-    if (!isOpen) open()
   })
 
   function error (res, err, code) {
@@ -97,8 +114,9 @@ if (argv.help || argv._[0] === 'help') {
     res.end('error: ' + err)
   }
 
-  var server = http.createServer(function handler(req, res) {
+  var server = protocol.createServer(serverOptions, function handler(req, res) {
     if (!argv.quiet) console.log(req.method, req.url)
+    console.log(isOpen)
     if (!isOpen) return openQueue.push(function () { handler(req, res) })
     // todo: etag, if-modified-since, and head requests
     if (req.method === 'GET') {
