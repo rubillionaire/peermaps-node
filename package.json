@@ -6,9 +6,10 @@
     "peermaps": "cmd.js"
   },
   "dependencies": {
-    "eyros": "^4.7.0",
-    "hyperdrive": "^10.21.0",
-    "hyperswarm": "^2.15.3",
+    "corestore": "^6.5.1",
+    "eyros": "^4.7.2",
+    "hyperdrive": "^11.0.0-alpha.10",
+    "hyperswarm": "^4.3.7",
     "length-prefixed-stream": "^2.0.0",
     "mime": "^3.0.0",
     "minimist": "^1.2.5",

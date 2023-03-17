@@ -20,12 +20,15 @@ if (argv.help || argv._[0] === 'help') {
 } else if (argv._[0] === 'datadir') {
   console.log(getDataDir())
 } else if (argv._[0] === 'query') {
+  console.log('query')
   var u = argv._[1]
   var datadir = getDataDir()
   var bbox = argv.bbox.split(',').map(Number)
   var m, storage
   if (m = /^hyper:[\/]*([^\/]+)/.exec(u)) {
     var file = path.join(datadir, m[1].replace(/[^A-Za-z0-9]+/g,'-'))
+    // var storage = require('./lib/hyperdrive')(file, u)
+    file = datadir
     var storage = require('./lib/hyperdrive')(file, u)
   } else {
     return console.error('URI not yet supported')
@@ -50,7 +53,7 @@ if (argv.help || argv._[0] === 'help') {
         lp.write(row[1])
       } else if (format === 'base64') {
         var b64 = Buffer.from(row[1]).toString('base64')
-        process.stdout.write(b64+'\n')
+        // process.stdout.write(b64+'\n')
       }
       i++
     }
@@ -69,10 +72,10 @@ if (argv.help || argv._[0] === 'help') {
       key: fs.readFileSync(argv.k || path.join(__dirname, 'localhost-key.pem')),
       cert: fs.readFileSync(argv.c|| path.join(__dirname, 'localhost-cert.pem')),
     }
-    console.log({serverOptions})
   }
+  var Corestore = require('corestore')
   var Hyperdrive = require('hyperdrive')
-  var hyperswarm = require('hyperswarm')
+  var Hyperswarm = require('hyperswarm')
   var mime = require('mime')
   var u = argv._[1]
   var datadir = getDataDir()
@@ -81,9 +84,9 @@ if (argv.help || argv._[0] === 'help') {
   // var file = path.join(datadir, m[1].replace(/[^A-Za-z0-9]+/g,'-'))
   var file = datadir
   var key = u.replace(/^hyper:[\/]*/,'')
-  var swarm = hyperswarm()
-  console.log({ file, key })
-  var drive = new Hyperdrive(file, key)
+  var swarm = new Hyperswarm()
+  var store = new Corestore(file)
+  var drive = new Hyperdrive(store, Buffer.from(key, 'hex'))
   var isOpen = false
   var openQueue = []
   function open() {
@@ -114,12 +117,13 @@ if (argv.help || argv._[0] === 'help') {
     res.end('error: ' + err)
   }
 
-  var server = protocol.createServer(serverOptions, function handler(req, res) {
+  var server = protocol.createServer(serverOptions, async function handler(req, res) {
     if (!argv.quiet) console.log(req.method, req.url)
     console.log(isOpen)
     if (!isOpen) return openQueue.push(function () { handler(req, res) })
     // todo: etag, if-modified-since, and head requests
     if (req.method === 'GET') {
+      console.log('process-get')
       var ct = mime.getType(path.extname(req.url)) || 'application/octet-stream'
       res.setHeader('content-type', ct)
       res.setHeader('access-control-allow-origin', '*')
@@ -130,26 +134,17 @@ if (argv.help || argv._[0] === 'help') {
       res.setHeader('access-control-expose-headers', [
         'content-range', 'x-chunked-output', 'x-stream-output'
       ])
-      drive.open(req.url, 'r', function (err, fd) {
-        if (err) {
-          error(res, err, err.code === 'ENOENT' ? 404 : 500)
-          return
-        }
-        drive.stat(req.url, { wait: true }, function (err, stat) {
-          if (err) {
-            error(res, err, 500)
-            return
-          }
-          var buf = Buffer.alloc(stat.size)
-          drive.read(fd, buf, 0, stat.size, 0, function (err) {
-            if (err) {
-              error(res, err, 500)
-            } else {
-              res.end(buf)
-            }
-          })
+      // var name = req.url.slice(1)
+      drive.get(req.url)
+        .then(buf => {
+          console.log('found-buf', buf && buf.length)
+          res.end(buf)
         })
-      })
+        .catch(err => {
+          console.log('err')
+          console.log(err)
+          error(res, err, 404)
+        })
     } else {
       error(res, 'method not allowed', 405)
     }
